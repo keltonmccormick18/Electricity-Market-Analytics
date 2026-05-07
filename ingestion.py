@@ -27,11 +27,27 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import tomllib
+
 import requests
 import duckdb
 from dotenv import load_dotenv
 
+
+def _load_streamlit_secrets(path: str = ".streamlit/secrets.toml") -> None:
+    """Inject .streamlit/secrets.toml values into os.environ (if not already set)."""
+    p = Path(path)
+    if not p.exists():
+        return
+    with p.open("rb") as f:
+        secrets = tomllib.load(f)
+    for key, value in secrets.items():
+        if isinstance(value, str) and key not in os.environ:
+            os.environ[key] = value
+
+
 load_dotenv()
+_load_streamlit_secrets()
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 

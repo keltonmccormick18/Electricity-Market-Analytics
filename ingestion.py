@@ -59,10 +59,32 @@ log = logging.getLogger(__name__)
 
 # ── Database setup ─────────────────────────────────────────────────────────────
 
-def get_db(db_path: Path = DB_PATH) -> duckdb.DuckDBPyConnection:
-    """Open (or create) the DuckDB database and apply schema."""
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(str(db_path))
+def get_db(target: str = str(DB_PATH)) -> duckdb.DuckDBPyConnection:
+    """
+    Open (or create) the database and apply schema.
+
+    *target* is either:
+      - a local file path  (default: data/electricity.duckdb)
+      - a MotherDuck URI   (e.g. md:energy)
+
+    For MotherDuck, MOTHERDUCK_TOKEN must be set in the environment.
+    """
+    is_motherduck = target.startswith("md:")
+    if is_motherduck:
+        token = os.getenv("MOTHERDUCK_TOKEN")
+        if not token:
+            raise SystemExit(
+                "MOTHERDUCK_TOKEN env var is required for MotherDuck connections.\n"
+                "  export MOTHERDUCK_TOKEN=eyJhbGc..."
+            )
+        con = duckdb.connect(target, config={"motherduck_token": token})
+        log.info("Connected to MotherDuck: %s", target)
+    else:
+        path = Path(target)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        con = duckdb.connect(str(path))
+        log.info("Connected to local DB: %s", path.resolve())
+
     if SCHEMA.exists():
         con.execute(SCHEMA.read_text())
         log.info("Schema applied from %s", SCHEMA)
@@ -392,13 +414,22 @@ def main():
         help="End date for full mode (YYYY-MM-DD)"
     )
     parser.add_argument(
+        "--db",
+        default=str(DB_PATH),
+        help=(
+            "Database target — local file path (default: data/electricity.duckdb) "
+            "or MotherDuck URI (e.g. md:energy). "
+            "MotherDuck requires MOTHERDUCK_TOKEN in the environment."
+        ),
+    )
+    parser.add_argument(
         "--skip-prices",
         action="store_true",
         help="Skip price ingestion (faster for initial load)"
     )
     args = parser.parse_args()
 
-    con = get_db()
+    con = get_db(args.db)
 
     if args.mode == "incremental":
         date_from = _get_incremental_start(con)
@@ -410,7 +441,7 @@ def main():
         log.info("Full mode: %s → %s across %d regions", date_from, date_to, len(args.regions))
 
     log.info("Regions: %s", ", ".join(args.regions))
-    log.info("DB: %s", DB_PATH.resolve())
+    log.info("DB: %s", args.db)
 
     if API_KEY == "DEMO_KEY":
         log.warning("Using DEMO_KEY — rate limited to ~30 requests/day. "

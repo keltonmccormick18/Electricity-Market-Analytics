@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# DuckDB (local data — use MotherDuck for cloud)
+data/electricity.duckdb
+data/*.parquet
+
+# Secrets — never commit
+.streamlit/secrets.toml
+
+# macOS
+.DS_Store

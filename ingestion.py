@@ -29,6 +29,7 @@ from pathlib import Path
 
 import tomllib
 
+import pandas as pd
 import requests
 import duckdb
 from dotenv import load_dotenv
@@ -206,26 +207,14 @@ def ingest_demand(con: duckdb.DuckDBPyConnection,
             elif row["type"] == "DF":
                 demand_map[hour]["demand_forecast"] = row.get("value")
 
-        records = [
-            (
-                _parse_eia_hour(hour),
-                region,
-                v["demand_mwh"],
-                v["demand_forecast"]
-            )
-            for hour, v in demand_map.items()
-        ]
-
-        con.executemany(
-            """
-            INSERT OR REPLACE INTO fact_demand
-                (hour, region_id, demand_mwh, demand_forecast)
-            VALUES (?, ?, ?, ?)
-            """,
-            records
+        df = pd.DataFrame(
+            [(_parse_eia_hour(h), region, v["demand_mwh"], v["demand_forecast"])
+             for h, v in demand_map.items()],
+            columns=["hour", "region_id", "demand_mwh", "demand_forecast"],
         )
-        total_inserted += len(records)
-        _log_ingestion(con, "demand", region, date_from, date_to, len(records), "success")
+        con.execute("INSERT OR REPLACE INTO fact_demand SELECT * FROM df")
+        total_inserted += len(df)
+        _log_ingestion(con, "demand", region, date_from, date_to, len(df), "success")
         log.info("  inserted %d demand rows for %s", len(records), region)
 
     return total_inserted
@@ -271,28 +260,15 @@ def ingest_generation(con: duckdb.DuckDBPyConnection,
             log.warning("No generation data returned for %s", region)
             continue
 
-        records = [
-            (
-                _parse_eia_hour(row["period"]),
-                region,
-                row.get("fueltype", "OTH"),
-                row.get("value")
-            )
-            for row in rows
-            if row.get("fueltype") in fuel_types
-        ]
-
-        con.executemany(
-            """
-            INSERT OR REPLACE INTO fact_generation
-                (hour, region_id, fuel_id, generation_mwh)
-            VALUES (?, ?, ?, ?)
-            """,
-            records
+        df = pd.DataFrame(
+            [(_parse_eia_hour(row["period"]), region, row.get("fueltype", "OTH"), row.get("value"))
+             for row in rows if row.get("fueltype") in fuel_types],
+            columns=["hour", "region_id", "fuel_id", "generation_mwh"],
         )
-        total_inserted += len(records)
-        _log_ingestion(con, "generation", region, date_from, date_to, len(records), "success")
-        log.info("  inserted %d generation rows for %s", len(records), region)
+        con.execute("INSERT OR REPLACE INTO fact_generation SELECT * FROM df")
+        total_inserted += len(df)
+        _log_ingestion(con, "generation", region, date_from, date_to, len(df), "success")
+        log.info("  inserted %d generation rows for %s", len(df), region)
 
     return total_inserted
 
@@ -340,28 +316,16 @@ def ingest_prices(con: duckdb.DuckDBPyConnection,
             log.error("HTTP error for %s prices: %s", region, e)
             continue
 
-        records = [
-            (
-                _parse_eia_hour(row["period"]),
-                region,
-                "day_ahead",
-                row.get("value")
+        if rows:
+            df = pd.DataFrame(
+                [(_parse_eia_hour(row["period"]), region, "day_ahead", row.get("value"))
+                 for row in rows],
+                columns=["hour", "region_id", "price_type", "price_usd_mwh"],
             )
-            for row in rows
-        ]
-
-        if records:
-            con.executemany(
-                """
-                INSERT OR REPLACE INTO fact_prices
-                    (hour, region_id, price_type, price_usd_mwh)
-                VALUES (?, ?, ?, ?)
-                """,
-                records
-            )
-            total_inserted += len(records)
-            _log_ingestion(con, "prices", region, date_from, date_to, len(records), "success")
-            log.info("  inserted %d price rows for %s", len(records), region)
+            con.execute("INSERT OR REPLACE INTO fact_prices SELECT * FROM df")
+            total_inserted += len(df)
+            _log_ingestion(con, "prices", region, date_from, date_to, len(df), "success")
+            log.info("  inserted %d price rows for %s", len(df), region)
 
     return total_inserted
 

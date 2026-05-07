@@ -278,33 +278,40 @@ if "last_result" in st.session_state:
             mime="text/csv",
         )
 
-        # Auto chart
-        chart_type = db.suggest_chart(df)
-        if chart_type and not df.empty:
+        # Chart panel — always shown when there is at least one numeric column
+        num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+        if num_cols and not df.empty:
             with st.expander("📊 Chart", expanded=True):
-                num_cols = [
-                    c for c in df.columns
-                    if pd.api.types.is_numeric_dtype(df[c])
-                ]
-                cat_cols = [c for c in df.columns if c not in num_cols]
+                all_cols = df.columns.tolist()
 
-                c1, c2, c3 = st.columns(3)
-                x_col = c1.selectbox("X axis", df.columns.tolist(),
-                                     index=0 if cat_cols else 0)
-                y_col = c2.selectbox("Y axis", num_cols,
-                                     index=0 if num_cols else 0)
-                color_col = c3.selectbox(
+                # Smart defaults: prefer datetime → categorical for x-axis
+                time_cols = [c for c in all_cols
+                             if pd.api.types.is_datetime64_any_dtype(df[c])]
+                cat_cols  = [c for c in all_cols if c not in num_cols]
+                x_default = (time_cols or cat_cols or all_cols)[0]
+                x_default_idx = all_cols.index(x_default)
+
+                c1, c2, c3, c4 = st.columns(4)
+                chart_type = c1.selectbox("Chart type", ["line", "bar", "scatter"],
+                                          key="chart_type_sel")
+                x_col = c2.selectbox("X axis", all_cols, index=x_default_idx,
+                                     key="chart_x")
+                y_col = c3.selectbox("Y axis", num_cols, index=0, key="chart_y")
+                color_col = c4.selectbox(
                     "Colour by",
-                    ["(none)"] + [c for c in df.columns if c not in (x_col, y_col)],
+                    ["(none)"] + [c for c in all_cols if c not in (x_col, y_col)],
+                    key="chart_color",
                 )
                 color_arg = None if color_col == "(none)" else color_col
 
+                kwargs = dict(x=x_col, y=y_col, color=color_arg,
+                              template="plotly_white")
                 if chart_type == "line":
-                    fig = px.line(df, x=x_col, y=y_col, color=color_arg,
-                                  template="plotly_white")
+                    fig = px.line(df, **kwargs)
+                elif chart_type == "bar":
+                    fig = px.bar(df, **kwargs)
                 else:
-                    fig = px.bar(df, x=x_col, y=y_col, color=color_arg,
-                                 template="plotly_white")
+                    fig = px.scatter(df, **kwargs)
 
                 fig.update_layout(margin=dict(t=20, b=20))
                 st.plotly_chart(fig, use_container_width=True)

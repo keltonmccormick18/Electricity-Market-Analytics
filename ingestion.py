@@ -215,7 +215,7 @@ def ingest_demand(con: duckdb.DuckDBPyConnection,
         con.execute("INSERT OR REPLACE INTO fact_demand SELECT * FROM df")
         total_inserted += len(df)
         _log_ingestion(con, "demand", region, date_from, date_to, len(df), "success")
-        log.info("  inserted %d demand rows for %s", len(records), region)
+        log.info("  inserted %d demand rows for %s", len(df), region)
 
     return total_inserted
 

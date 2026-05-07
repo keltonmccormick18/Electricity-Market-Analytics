@@ -297,9 +297,15 @@ if "last_result" in st.session_state:
                 x_col = c2.selectbox("X axis", all_cols, index=x_default_idx,
                                      key="chart_x")
                 y_col = c3.selectbox("Y axis", num_cols, index=0, key="chart_y")
+
+                # Default colour to first categorical column that isn't x
+                color_options = ["(none)"] + [c for c in all_cols if c not in (x_col, y_col)]
+                color_default = next(
+                    (c for c in cat_cols if c not in (x_col, y_col)), "(none)"
+                )
                 color_col = c4.selectbox(
-                    "Colour by",
-                    ["(none)"] + [c for c in all_cols if c not in (x_col, y_col)],
+                    "Colour by", color_options,
+                    index=color_options.index(color_default),
                     key="chart_color",
                 )
                 color_arg = None if color_col == "(none)" else color_col

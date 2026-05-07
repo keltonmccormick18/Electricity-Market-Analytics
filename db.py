@@ -25,8 +25,9 @@ LOCAL_DB = Path("data/electricity.duckdb")
 def get_connection() -> duckdb.DuckDBPyConnection:
     token = _secret("MOTHERDUCK_TOKEN")
     if token:
+        os.environ["motherduck_token"] = token
         db = _secret("MOTHERDUCK_DB") or "energy"
-        return duckdb.connect(f"md:{db}", config={"motherduck_token": token})
+        return duckdb.connect(f"md:{db}")
     LOCAL_DB.parent.mkdir(parents=True, exist_ok=True)
     return duckdb.connect(str(LOCAL_DB))
 

@@ -137,7 +137,7 @@ def eia_fetch_all(endpoint: str, params: dict) -> list[dict]:
 
         response_data = data.get("response", {})
         rows          = response_data.get("data", [])
-        total         = response_data.get("total", 0)
+        total         = int(response_data.get("total", 0))
 
         if not rows:
             break

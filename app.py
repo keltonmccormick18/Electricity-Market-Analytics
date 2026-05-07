@@ -194,7 +194,7 @@ with st.sidebar:
     # Example queries
     st.subheader("Example queries", anchor=False)
     for name, sql in EXAMPLES.items():
-        if st.button(name, use_container_width=True, key=f"ex_{name}"):
+        if st.button(name, width="stretch", key=f"ex_{name}"):
             st.session_state.sql = sql
 
     st.divider()
@@ -204,7 +204,7 @@ with st.sidebar:
         st.subheader("History", anchor=False)
         for i, past_sql in enumerate(st.session_state.history[:8]):
             preview = past_sql.strip().splitlines()[0][:48] + "…"
-            if st.button(preview, key=f"hist_{i}", use_container_width=True):
+            if st.button(preview, key=f"hist_{i}", width="stretch"):
                 st.session_state.sql = past_sql
 
 # ── Main: SQL editor ──────────────────────────────────────────────────────────
@@ -224,7 +224,7 @@ with col_editor:
     )
 
 with col_btn:
-    run_clicked = st.button("▶ Run", type="primary", use_container_width=True)
+    run_clicked = st.button("▶ Run", type="primary", width="stretch")
 
 # Row-limit safety rail
 max_rows = st.sidebar.number_input("Row limit", min_value=100, max_value=100_000,
@@ -267,7 +267,7 @@ if "last_result" in st.session_state:
         m3.metric("Time", f"{result.elapsed_s * 1000:.0f} ms")
 
         # Data table
-        st.dataframe(df, use_container_width=True, height=380)
+        st.dataframe(df, width="stretch", height=380)
 
         # Download
         csv = df.to_csv(index=False).encode()
@@ -320,4 +320,4 @@ if "last_result" in st.session_state:
                     fig = px.scatter(df, **kwargs)
 
                 fig.update_layout(margin=dict(t=20, b=20))
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")

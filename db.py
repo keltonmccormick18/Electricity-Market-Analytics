@@ -10,6 +10,7 @@ empty results rather than raising.
 """
 
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -18,6 +19,7 @@ import pandas as pd
 import streamlit as st
 
 LOCAL_DB = Path("data/electricity.duckdb")
+_lock = threading.Lock()
 
 # ── Connection ────────────────────────────────────────────────────────────────
 
@@ -91,7 +93,8 @@ def run_query(con: duckdb.DuckDBPyConnection, sql: str) -> QueryResult:
         return QueryResult(None, 0.0, "Empty query.")
     t0 = time.perf_counter()
     try:
-        df = con.execute(sql).fetchdf()
+        with _lock:
+            df = con.execute(sql).fetchdf()
         return QueryResult(df, time.perf_counter() - t0, None)
     except Exception as exc:
         return QueryResult(None, time.perf_counter() - t0, str(exc))

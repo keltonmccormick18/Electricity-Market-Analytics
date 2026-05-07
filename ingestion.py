@@ -110,16 +110,31 @@ def get_db(target: str = str(DB_PATH)) -> duckdb.DuckDBPyConnection:
 
 # ── EIA API helpers ────────────────────────────────────────────────────────────
 
-def eia_get(endpoint: str, params: dict) -> dict:
+def eia_get(endpoint: str, params: dict, retries: int = 5) -> dict:
     """
     Make a single paginated GET request to the EIA v2 API.
-    Raises on HTTP errors. Returns the parsed JSON dict.
+    Retries up to *retries* times with exponential backoff on timeouts or 5xx errors.
     """
     params["api_key"] = API_KEY
     url = f"{BASE_URL}/{endpoint}/data/"
-    resp = requests.get(url, params=params, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
+    for attempt in range(retries):
+        try:
+            resp = requests.get(url, params=params, timeout=60)
+            resp.raise_for_status()
+            return resp.json()
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            wait = 2 ** attempt
+            log.warning("Request timeout/connection error (attempt %d/%d), retrying in %ds: %s",
+                        attempt + 1, retries, wait, e)
+            time.sleep(wait)
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code >= 500:
+                wait = 2 ** attempt
+                log.warning("EIA 5xx error (attempt %d/%d), retrying in %ds", attempt + 1, retries, wait)
+                time.sleep(wait)
+            else:
+                raise
+    raise requests.exceptions.RetryError(f"EIA API failed after {retries} retries: {url}")
 
 
 def eia_fetch_all(endpoint: str, params: dict) -> list[dict]:

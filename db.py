@@ -46,11 +46,8 @@ def backend_label(con: duckdb.DuckDBPyConnection) -> str:
 
 def list_tables(con: duckdb.DuckDBPyConnection) -> list[str]:
     try:
-        rows = con.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'main' ORDER BY table_name"
-        ).fetchall()
-        return [r[0] for r in rows]
+        rows = con.execute("SHOW TABLES").fetchall()
+        return sorted(r[0] for r in rows)
     except Exception:
         return []
 
@@ -58,15 +55,9 @@ def list_tables(con: duckdb.DuckDBPyConnection) -> list[str]:
 def table_info(con: duckdb.DuckDBPyConnection, table: str) -> pd.DataFrame:
     """Return (column_name, data_type, nullable) for *table*."""
     try:
-        return con.execute(
-            "SELECT column_name, data_type, is_nullable "
-            "FROM information_schema.columns "
-            "WHERE table_schema = 'main' AND table_name = ? "
-            "ORDER BY ordinal_position",
-            [table],
-        ).fetchdf()
+        return con.execute(f'DESCRIBE "{table}"').fetchdf()
     except Exception:
-        return pd.DataFrame(columns=["column_name", "data_type", "is_nullable"])
+        return pd.DataFrame(columns=["column_name", "column_type", "null"])
 
 
 def row_count(con: duckdb.DuckDBPyConnection, table: str) -> int | None:

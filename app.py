@@ -179,10 +179,13 @@ with st.sidebar:
             with st.expander(label):
                 info = db.table_info(con, tbl)
                 for _, row in info.iterrows():
-                    nullable = "" if row["is_nullable"] == "YES" else " ●"
+                    col  = row.get("column_name") or row.get("Field", "")
+                    typ  = row.get("column_type") or row.get("Type", "")
+                    null = row.get("null") or row.get("Null", "YES")
+                    dot  = "" if str(null).upper() in ("YES", "TRUE", "1") else " ●"
                     st.markdown(
-                        f"`{row['column_name']}` <span style='color:grey;font-size:0.8em'>"
-                        f"{row['data_type']}{nullable}</span>",
+                        f"`{col}` <span style='color:grey;font-size:0.8em'>"
+                        f"{typ}{dot}</span>",
                         unsafe_allow_html=True,
                     )
 

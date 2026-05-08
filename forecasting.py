@@ -395,6 +395,9 @@ def get_residuals(ml_results: list[dict], sarima_results: list[dict]) -> dict[st
 
 def compute_acf_pacf(residuals: np.ndarray, nlags: int = 48) -> dict:
     from statsmodels.tsa.stattools import acf, pacf
+    # pacf requires nlags < nobs // 2
+    max_lags = len(residuals) // 2 - 1
+    nlags = min(nlags, max(1, max_lags))
     acf_v,  acf_ci  = acf(residuals,  nlags=nlags, alpha=0.05)
     pacf_v, pacf_ci = pacf(residuals, nlags=nlags, alpha=0.05)
     lags = np.arange(nlags + 1)

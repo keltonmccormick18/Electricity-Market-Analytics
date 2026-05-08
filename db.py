@@ -100,6 +100,42 @@ def run_query(con: duckdb.DuckDBPyConnection, sql: str) -> QueryResult:
         return QueryResult(None, time.perf_counter() - t0, str(exc))
 
 
+# ── Live system helpers ───────────────────────────────────────────────────────
+
+def get_last_updated(con: duckdb.DuckDBPyConnection) -> str:
+    """Timestamp of the most recent demand record — displayed as 'data last updated'."""
+    try:
+        ts = con.execute("SELECT MAX(hour) FROM fact_demand").fetchone()[0]
+        return str(ts)[:16] if ts else "—"
+    except Exception:
+        return "—"
+
+
+def get_summary_stats(con: duckdb.DuckDBPyConnection) -> dict:
+    try:
+        row = con.execute("""
+            SELECT
+                COUNT(DISTINCT region_id),
+                MIN(hour)::DATE,
+                MAX(hour)::DATE,
+                COUNT(*)
+            FROM fact_demand
+        """).fetchone()
+        gen_rows = con.execute("SELECT COUNT(*) FROM fact_generation").fetchone()[0]
+        price_rows = con.execute("SELECT COUNT(*) FROM fact_prices").fetchone()[0]
+        return {
+            "regions":     int(row[0])  if row[0]  else 0,
+            "date_from":   str(row[1])  if row[1]  else "—",
+            "date_to":     str(row[2])  if row[2]  else "—",
+            "demand_rows": int(row[3])  if row[3]  else 0,
+            "gen_rows":    int(gen_rows)    if gen_rows    else 0,
+            "price_rows":  int(price_rows)  if price_rows  else 0,
+        }
+    except Exception:
+        return {"regions": 0, "date_from": "—", "date_to": "—",
+                "demand_rows": 0, "gen_rows": 0, "price_rows": 0}
+
+
 # ── Auto-chart heuristic ──────────────────────────────────────────────────────
 
 def suggest_chart(df: pd.DataFrame) -> str | None:

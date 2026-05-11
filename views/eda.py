@@ -538,9 +538,11 @@ with tab_heatmap:
                     y=mape_df["MAPE_mean"],
                     error_y=dict(type="data", array=mape_df["MAPE_std"].tolist(),
                                   visible=True, color="#888"),
-                    marker_color=mape_df["MAPE_mean"],
-                    marker_colorscale="YlOrRd",
-                    showscale=False,
+                    marker=dict(
+                        color=mape_df["MAPE_mean"].tolist(),
+                        colorscale="YlOrRd",
+                        showscale=False,
+                    ),
                     name="Mean MAPE",
                 ))
                 fig_mape.update_layout(
@@ -566,12 +568,14 @@ with tab_heatmap:
             with st.expander("Clock chart (24h polar)"):
                 theta = mape_df["hour_of_day"] * 15  # 360 / 24
                 fig_polar = go.Figure(go.Barpolar(
-                    r=mape_df["MAPE_mean"],
-                    theta=theta,
+                    r=mape_df["MAPE_mean"].tolist(),
+                    theta=theta.tolist(),
                     width=[15] * len(mape_df),
-                    marker_color=mape_df["MAPE_mean"],
-                    marker_colorscale="YlOrRd",
-                    showscale=False,
+                    marker=dict(
+                        color=mape_df["MAPE_mean"].tolist(),
+                        colorscale="YlOrRd",
+                        showscale=False,
+                    ),
                 ))
                 fig_polar.update_layout(
                     template=_DARK, height=380,

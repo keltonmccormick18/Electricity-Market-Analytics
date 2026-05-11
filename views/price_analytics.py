@@ -1,3 +1,4 @@
+import numpy as np
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -95,6 +96,63 @@ def load_merit_order(start_year: int, end_year: int) -> pd.DataFrame | None:
     return result.df if not result.error else None
 
 
+@st.cache_data(ttl=300)
+def load_merit_hourly(start_year: int, end_year: int, region: str) -> pd.DataFrame | None:
+    """Hourly panel data with demand included for controlled OLS."""
+    con = db.get_connection()
+    result = db.run_query(con, f"""
+        SELECT
+            HOUR(g.hour)  AS hour_of_day,
+            ROUND(
+                SUM(CASE WHEN g.fuel_id IN ('SUN','WND','WAT') THEN g.generation_mwh ELSE 0 END)
+                / NULLIF(SUM(g.generation_mwh), 0), 4
+            ) AS ren_share,
+            ROUND(AVG(p.price_usd_mwh), 2)  AS price_usd_mwh,
+            ROUND(AVG(d.demand_mwh), 0)      AS demand_mwh,
+            CASE MONTH(g.hour)
+                WHEN 12 THEN 'Winter' WHEN 1 THEN 'Winter' WHEN 2 THEN 'Winter'
+                WHEN 3  THEN 'Spring' WHEN 4 THEN 'Spring' WHEN 5 THEN 'Spring'
+                WHEN 6  THEN 'Summer' WHEN 7 THEN 'Summer' WHEN 8 THEN 'Summer'
+                ELSE 'Fall'
+            END AS season
+        FROM fact_generation g
+        JOIN fact_prices p
+          ON p.hour = g.hour AND p.region_id = g.region_id AND p.price_type = 'day_ahead'
+        JOIN fact_demand d
+          ON d.hour = g.hour AND d.region_id = g.region_id
+        WHERE g.region_id = '{region}'
+          AND YEAR(g.hour) BETWEEN {start_year} AND {end_year}
+          AND p.price_usd_mwh BETWEEN -50 AND 500
+          AND d.demand_mwh > 0
+        GROUP BY g.hour
+        HAVING ren_share IS NOT NULL
+        ORDER BY g.hour
+    """)
+    return result.df if not result.error else None
+
+
+def run_controlled_ols(df: pd.DataFrame):
+    """
+    OLS: price ~ ren_share + demand_mwh + hod_sin + hod_cos
+    Returns (fitted model, df with residuals).
+    HC3 heteroskedasticity-robust standard errors.
+    """
+    import statsmodels.api as sm
+    df = df.dropna(subset=["ren_share", "price_usd_mwh", "demand_mwh"]).copy()
+    df["hod_sin"] = np.sin(2 * np.pi * df["hour_of_day"] / 24)
+    df["hod_cos"] = np.cos(2 * np.pi * df["hour_of_day"] / 24)
+
+    X = sm.add_constant(df[["ren_share", "demand_mwh", "hod_sin", "hod_cos"]])
+    y = df["price_usd_mwh"]
+    model = sm.OLS(y, X).fit(cov_type="HC3")
+
+    # Partial regression residuals for the added-variable plot
+    X_controls = sm.add_constant(df[["demand_mwh", "hod_sin", "hod_cos"]])
+    df["price_resid"]    = sm.OLS(y,              X_controls).fit().resid
+    df["ren_share_resid"] = sm.OLS(df["ren_share"], X_controls).fit().resid
+    return model, df
+
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
@@ -178,6 +236,14 @@ with tab_merit:
     st.subheader(
         f"Renewable share vs wholesale price — {start_year}–{end_year}", anchor=False
     )
+
+    # ── Section 1: Raw weekly scatter ─────────────────────────────────────────
+    st.markdown("#### Raw relationship (weekly averages)")
+    st.caption(
+        "Naïve bivariate view. Demand level, hour-of-day, and hydro variation "
+        "all confound this signal — see the controlled regression below."
+    )
+
     df_merit = load_merit_order(start_year, end_year)
 
     if df_merit is None or df_merit.empty:
@@ -209,8 +275,86 @@ with tab_merit:
         )
         fig_scatter.update_layout(height=520, margin=dict(t=40, b=20))
         st.plotly_chart(fig_scatter, width="stretch")
+        st.caption("Each point = one week average. OLS fit per season per group.")
+
+    # ── Section 2: Controlled regression ──────────────────────────────────────
+    st.divider()
+    st.markdown("#### Controlled regression (hourly panel)")
+    st.caption(
+        f"OLS on hourly data for **{region}**, controlling for demand level and "
+        "hour-of-day (cyclical sin/cos encoding). HC3 robust standard errors. "
+        "The partial regression plot shows the ren\\_share–price relationship "
+        "after removing variation explained by the other controls."
+    )
+
+    run_ols = st.button("▶ Run controlled regression", key="run_ols")
+
+    if run_ols:
+        with st.spinner("Loading hourly data and fitting OLS…"):
+            df_hourly = load_merit_hourly(start_year, end_year, region)
+        if df_hourly is None or df_hourly.empty:
+            st.warning("No hourly data available for this region / range.")
+        else:
+            model, df_resid = run_controlled_ols(df_hourly)
+            st.session_state["ols_result"] = (region, start_year, end_year, model, df_resid)
+
+    ols_cache = st.session_state.get("ols_result")
+    if ols_cache and ols_cache[:3] == (region, start_year, end_year):
+        _, _, _, model, df_resid = ols_cache
+
+        # Coefficient table
+        coef_df = pd.DataFrame({
+            "Variable":  ["Intercept", "Renewable share", "Demand (MWh)",
+                           "Hour sin", "Hour cos"],
+            "Coef ($/MWh)": model.params.round(4).values,
+            "Std Err":       model.bse.round(4).values,
+            "t":             model.tvalues.round(3).values,
+            "p-value":       model.pvalues.round(4).values,
+        })
+        coef_df["Sig."] = coef_df["p-value"].apply(
+            lambda p: "***" if p < 0.001 else ("**" if p < 0.01 else ("*" if p < 0.05 else ""))
+        )
+
+        col_coef, col_stats = st.columns([3, 1])
+        with col_coef:
+            st.dataframe(coef_df, hide_index=True, width="stretch")
+        with col_stats:
+            st.metric("R²",       f"{model.rsquared:.3f}")
+            st.metric("Adj. R²",  f"{model.rsquared_adj:.3f}")
+            st.metric("N (hours)", f"{int(model.nobs):,}")
+
+        ren_coef = model.params["ren_share"]
+        ren_p    = model.pvalues["ren_share"]
+        direction = "negative" if ren_coef < 0 else "positive"
+        sig_label = "significant" if ren_p < 0.05 else "not significant"
+        st.info(
+            f"Controlling for demand and hour-of-day, a 10pp increase in renewable share "
+            f"is associated with a **{ren_coef * 0.10:+.2f} $/MWh** change in day-ahead price "
+            f"({direction}, {sig_label} at α=0.05, p={ren_p:.4f}).",
+            icon="📊",
+        )
+
+        # Partial regression (added-variable) plot
+        st.markdown("**Added-variable plot** — ren_share effect after partialling out controls")
+        color_season = REGION_COLORS.get(region, "#4fc3f7")
+        fig_avp = px.scatter(
+            df_resid.sample(min(3000, len(df_resid)), random_state=42),
+            x="ren_share_resid",
+            y="price_resid",
+            color="season",
+            trendline="ols",
+            opacity=0.35,
+            labels={
+                "ren_share_resid": "Renewable share residual",
+                "price_resid":     "Price residual ($/MWh)",
+                "season":          "Season",
+            },
+            template="plotly_dark",
+        )
+        fig_avp.update_layout(height=400, margin=dict(t=10, b=10))
+        st.plotly_chart(fig_avp, width="stretch")
         st.caption(
-            "Each point = one week average.  "
-            "Downward-sloping OLS line confirms the merit order effect: "
-            "higher renewable share compresses day-ahead prices."
+            "Both axes are residuals after removing demand and hour-of-day effects. "
+            "The slope here equals the ren_share coefficient in the table above. "
+            "A downward slope = merit order effect present after controlling for confounders."
         )

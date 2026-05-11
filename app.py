@@ -16,6 +16,7 @@ pg = st.navigation(
         "Analytics": [
             st.Page("views/generation_mix.py",  title="Generation Mix",  icon="⚡"),
             st.Page("views/price_analytics.py", title="Price Analytics", icon="💰"),
+            st.Page("views/eda.py",             title="EDA",             icon="🔬"),
             st.Page("views/sql_explorer.py",    title="SQL Explorer",    icon="🔍"),
         ],
         "Forecasting": [

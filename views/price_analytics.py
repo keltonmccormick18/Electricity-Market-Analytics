@@ -64,12 +64,13 @@ def load_spikes(region: str, year: int) -> pd.DataFrame | None:
 
 
 @st.cache_data(ttl=300)
-def load_merit_order(year: int) -> pd.DataFrame | None:
+def load_merit_order(start_year: int, end_year: int) -> pd.DataFrame | None:
     con = db.get_connection()
     result = db.run_query(con, f"""
         SELECT
             g.region_id,
-            DATE_TRUNC('week', g.hour)::DATE AS week,
+            YEAR(g.hour)                       AS year,
+            DATE_TRUNC('week', g.hour)::DATE   AS week,
             ROUND(
                 SUM(CASE WHEN g.fuel_id IN ('SUN','WND','WAT') THEN g.generation_mwh ELSE 0 END)
                 / NULLIF(SUM(g.generation_mwh), 0), 3
@@ -84,12 +85,12 @@ def load_merit_order(year: int) -> pd.DataFrame | None:
         FROM fact_generation g
         JOIN fact_prices p
           ON p.hour = g.hour AND p.region_id = g.region_id AND p.price_type = 'day_ahead'
-        WHERE YEAR(g.hour) = {year}
+        WHERE YEAR(g.hour) BETWEEN {start_year} AND {end_year}
           AND g.region_id IN ('CISO', 'PJM', 'NYIS', 'ISNE')
           AND p.price_usd_mwh BETWEEN -50 AND 500
-        GROUP BY 1, 2, 5
+        GROUP BY 1, 2, 3, 6
         HAVING ren_share IS NOT NULL
-        ORDER BY 1, 2
+        ORDER BY 1, 3
     """)
     return result.df if not result.error else None
 
@@ -98,8 +99,10 @@ def load_merit_order(year: int) -> pd.DataFrame | None:
 
 with st.sidebar:
     st.header("Filters", anchor=False)
-    region = st.selectbox("Region", PRICE_REGIONS, index=0)
-    year   = st.selectbox("Year", list(range(2024, 2013, -1)), index=0)
+    region     = st.selectbox("Region", PRICE_REGIONS, index=0)
+    year       = st.selectbox("Year", list(range(2024, 2013, -1)), index=0)
+    year_range = st.slider("Merit order year range", 2015, 2024, (2020, 2024))
+    start_year, end_year = year_range
 
 # ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -172,25 +175,34 @@ with tab_spikes:
 # ── Tab 3: Merit order scatter ────────────────────────────────────────────────
 
 with tab_merit:
-    st.subheader(f"Renewable share vs wholesale price — {year}", anchor=False)
-    df_merit = load_merit_order(year)
+    st.subheader(
+        f"Renewable share vs wholesale price — {start_year}–{end_year}", anchor=False
+    )
+    df_merit = load_merit_order(start_year, end_year)
 
     if df_merit is None or df_merit.empty:
-        st.warning("No data for the selected year.")
+        st.warning("No data for the selected year range.")
     else:
+        color_by = st.radio(
+            "Colour points by", ["Region", "Year"], horizontal=True, key="merit_color"
+        )
+        color_col = "region_id" if color_by == "Region" else "year"
+        color_map = REGION_COLORS if color_by == "Region" else None
+
         fig_scatter = px.scatter(
             df_merit,
             x="ren_share",
             y="avg_price",
-            color="region_id",
+            color=color_col,
+            color_discrete_map=color_map,
             facet_col="season",
             facet_col_wrap=2,
-            color_discrete_map=REGION_COLORS,
             trendline="ols",
             labels={
-                "ren_share": "Renewable Share",
-                "avg_price": "Avg Price ($/MWh)",
-                "region_id": "Region",
+                "ren_share":  "Renewable Share",
+                "avg_price":  "Avg Price ($/MWh)",
+                "region_id":  "Region",
+                "year":       "Year",
             },
             template="plotly_dark",
             opacity=0.6,

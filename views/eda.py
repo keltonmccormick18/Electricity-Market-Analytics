@@ -92,6 +92,90 @@ with tab_stl:
             fig_hist.update_layout(height=280, margin=dict(t=10, b=10))
             st.plotly_chart(fig_hist, width="stretch")
 
+        # ── Monthly seasonal section ──────────────────────────────────────────
+        st.subheader("Monthly Seasonal Pattern", anchor=False)
+        st.caption(
+            "STL removes daily (24 h) periodicity. "
+            "Aggregating the trend and residual by month reveals the **annual cycle** "
+            "and any month-level structure left unexplained by the daily decomposition."
+        )
+
+        monthly, hm_pivot = eda.monthly_seasonal_profile(stl_df)
+        MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun",
+                       "Jul","Aug","Sep","Oct","Nov","Dec"]
+        monthly["month_name"] = monthly["month"].apply(lambda m: MONTH_NAMES[m - 1])
+
+        col_trend, col_resid = st.columns(2)
+
+        with col_trend:
+            # Mean demand per month with ±1σ error bar
+            fig_trend = go.Figure()
+            fig_trend.add_trace(go.Bar(
+                x=monthly["month_name"],
+                y=monthly["demand_mean"],
+                error_y=dict(type="data", array=monthly["demand_std"].tolist(),
+                             visible=True, color="#888"),
+                marker_color="#4fc3f7",
+                name="Mean demand",
+            ))
+            fig_trend.add_trace(go.Scatter(
+                x=monthly["month_name"],
+                y=monthly["trend_mean"],
+                mode="lines+markers",
+                line=dict(color="#ff7f0e", width=2),
+                marker=dict(size=6),
+                name="STL trend mean",
+            ))
+            fig_trend.update_layout(
+                template=_DARK, height=300,
+                margin=dict(t=10, b=10),
+                yaxis_title="Demand (MWh)",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
+            )
+            st.plotly_chart(fig_trend, width="stretch")
+            st.caption("Bars = mean ± 1σ observed demand.  Line = STL trend component mean.")
+
+        with col_resid:
+            # Monthly mean residual — should be near zero; bias = unexplained structure
+            colors = ["#e74c3c" if v > 0 else "#2ecc71" for v in monthly["resid_mean"]]
+            fig_resid = go.Figure(go.Bar(
+                x=monthly["month_name"],
+                y=monthly["resid_mean"],
+                error_y=dict(type="data", array=monthly["resid_std"].tolist(),
+                             visible=True, color="#888"),
+                marker_color=colors,
+                name="Mean residual",
+            ))
+            fig_resid.add_hline(y=0, line_dash="dot", line_color="#888")
+            fig_resid.update_layout(
+                template=_DARK, height=300,
+                margin=dict(t=10, b=10),
+                yaxis_title="Residual (MWh)",
+            )
+            st.plotly_chart(fig_resid, width="stretch")
+            st.caption(
+                "Mean STL residual by month.  "
+                "Non-zero bars indicate annual structure the daily decomposition didn't absorb."
+            )
+
+        # Month × hour-of-day heatmap
+        st.markdown("**Average demand by month and hour of day**")
+        fig_hm = px.imshow(
+            hm_pivot,
+            color_continuous_scale="RdYlBu_r",
+            aspect="auto",
+            labels=dict(x="Hour of Day", y="Month", color="MWh"),
+            y=MONTH_NAMES,
+            template=_DARK,
+        )
+        fig_hm.update_layout(height=400, margin=dict(t=10, b=10))
+        fig_hm.update_xaxes(tickmode="linear", dtick=2)
+        st.plotly_chart(fig_hm, width="stretch")
+        st.caption(
+            "Each cell = mean demand for that month × hour combination.  "
+            "Reveals how the daily load shape shifts across seasons."
+        )
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 2 · MSTL Decomposition

@@ -69,6 +69,44 @@ def stl_decompose(df: pd.DataFrame, period: int = 24) -> pd.DataFrame | None:
     return out
 
 
+def monthly_seasonal_profile(stl_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Aggregate STL output by (month, hour_of_day) to expose the annual cycle
+    that STL's daily period cannot isolate.
+
+    Returns a DataFrame with:
+      month, hour_of_day,
+      mean/std of demand_mwh, trend, seasonal, resid
+    plus a monthly summary (collapsed over hours).
+    """
+    df = stl_df.copy()
+    df["month"]       = df["hour"].dt.month
+    df["hour_of_day"] = df["hour"].dt.hour
+
+    # Monthly summary (collapsed over all hours)
+    monthly = (
+        df.groupby("month")
+        .agg(
+            demand_mean=("demand_mwh", "mean"),
+            demand_std=("demand_mwh",  "std"),
+            trend_mean=("trend",       "mean"),
+            resid_mean=("resid",       "mean"),
+            resid_std=("resid",        "std"),
+        )
+        .round(1)
+        .reset_index()
+    )
+
+    # month × hour_of_day heatmap of mean demand
+    heatmap = (
+        df.groupby(["month", "hour_of_day"])["demand_mwh"]
+        .mean().round(1)
+        .unstack("hour_of_day")
+    )
+
+    return monthly, heatmap
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 2. MSTL Decomposition (daily + weekly)
 # ══════════════════════════════════════════════════════════════════════════════

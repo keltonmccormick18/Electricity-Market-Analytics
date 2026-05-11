@@ -144,14 +144,13 @@ with tab_cmp:
         seasonal_df    = cached["seasonal_df"]
         dm_df          = cached["dm_df"]
 
-        # ── 24h forecast overlay (last ML fold) ───────────────────────────────
-        last = ml_results[-1]
-        ts   = pd.to_datetime(last["timestamps"])
-
-        # Find matching SARIMA fold
-        sa_match = next(
-            (r for r in sarima_results if r["fold"] == last["fold"]), None
-        ) or sarima_results[-1]
+        # ── 24h forecast overlay — last fold shared across all models ────────
+        # SARIMA has fewer folds than ML; use the last index present in both
+        # so all three traces cover the same 24-hour test window.
+        shared_idx = min(len(ml_results), len(sarima_results)) - 1
+        last     = ml_results[shared_idx]
+        sa_match = sarima_results[shared_idx]
+        ts       = pd.to_datetime(last["timestamps"])
 
         color = REGION_COLORS.get(region, "#4fc3f7")
         fig = go.Figure()
@@ -161,17 +160,16 @@ with tab_cmp:
                                   name="XGBoost", line=dict(color="#ff7f0e", dash="dash")))
         fig.add_trace(go.Scatter(x=ts, y=last["tcn_pred"],
                                   name="TCN", line=dict(color="#2ca02c", dash="dot")))
-        if sa_match is not None:
-            sa_ts = pd.to_datetime(sa_match["timestamps"])
-            fig.add_trace(go.Scatter(x=sa_ts, y=sa_match["pred"],
-                                      name="SARIMA", line=dict(color="#9467bd", dash="longdash")))
+        sa_ts = pd.to_datetime(sa_match["timestamps"])
+        fig.add_trace(go.Scatter(x=sa_ts, y=sa_match["pred"],
+                                  name="SARIMA", line=dict(color="#9467bd", dash="longdash")))
         fig.update_layout(
             template="plotly_dark", height=320,
             margin=dict(t=10, b=10),
             legend=dict(orientation="h", yanchor="bottom", y=1.02),
             yaxis_title="Demand (MWh)",
         )
-        st.subheader("24-hour ahead forecast — last CV fold", anchor=False)
+        st.subheader("24-hour ahead forecast — last shared CV fold", anchor=False)
         st.plotly_chart(fig, width="stretch")
 
         # ── Overall metrics summary ────────────────────────────────────────────

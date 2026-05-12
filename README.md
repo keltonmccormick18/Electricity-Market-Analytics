@@ -3,7 +3,7 @@
 An interactive dashboard for exploring wholesale electricity markets across six US grid operators — built on live EIA data, DuckDB, and Streamlit.
 
 **Live app → [electricity-market-analytics.streamlit.app](https://electricity-market-analytics.streamlit.app)**  
-**Full write-up → `report.tex` (Overleaf)**
+**Full write-up → [Report]([url](https://www.overleaf.com/read/bthwwwmvqcvc#8bcc56)) (Overleaf)**
 
 ---
 

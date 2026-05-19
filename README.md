@@ -44,6 +44,14 @@ Diebold-Mariano tests (HLN size-corrected, Newey-West HAC variance): TCN vs. SAR
 | SQL Explorer | Live DuckDB query editor with schema browser and pre-built queries |
 | Demand Forecast | SARIMA / XGBoost / TCN benchmark, residual diagnostics, quantile regression |
 
+
+![Generation Page](generation.png)
+![Exploratory Data Analysis Page](eda.png)
+![SQL Explorer](explorer.png)
+![Forecasting Page](forecasting.png)
+
+
+
 ---
 
 ## Data Model

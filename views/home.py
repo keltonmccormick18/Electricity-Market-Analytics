@@ -12,7 +12,22 @@ con = db.get_connection()
 last = db.get_last_updated(con)
 stats = db.get_summary_stats(con)
 
-c1, c2, c3, c4, c5 = st.columns(5)
+# Smaller metric value font + allow wrapping so long timestamps / date ranges
+# don't clip. Streamlit clips with nowrap+ellipsis on the inner markdown
+# container, so the override targets that child with !important to win.
+st.markdown(
+    "<style>"
+    "[data-testid='stMetricValue']{font-size:1.3rem;}"
+    "[data-testid='stMetricValue'] [data-testid='stMarkdownContainer'],"
+    "[data-testid='stMetricValue'] [data-testid='stMarkdownContainer'] p{"
+    "white-space:normal !important;overflow:visible !important;"
+    "text-overflow:clip !important;line-height:1.2;}"
+    "</style>",
+    unsafe_allow_html=True,
+)
+
+# Extra width for the two text-heavy metrics (timestamp + date range).
+c1, c2, c3, c4, c5 = st.columns([1.5, 0.8, 2.0, 1.3, 1.3])
 c1.metric("Data last updated", last)
 c2.metric("Regions", stats["regions"])
 c3.metric("Date range", f"{stats['date_from'][:7]} → {stats['date_to'][:7]}")

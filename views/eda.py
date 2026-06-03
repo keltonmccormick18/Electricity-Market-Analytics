@@ -362,7 +362,7 @@ with tab_peak:
             fig_hod = px.bar(hod, x="Hour of Day", y="Count",
                               template=_DARK, color="Count",
                               color_continuous_scale="Reds")
-            fig_hod.update_layout(height=280, margin=dict(t=10, b=10),
+            fig_hod.update_layout(height=310, margin=dict(t=45, b=10),
                                    title="Hour of Day",
                                    coloraxis_showscale=False)
             st.plotly_chart(fig_hod, width="stretch")
@@ -375,7 +375,7 @@ with tab_peak:
             fig_dow = px.bar(dow, x="Day", y="Count",
                               template=_DARK, color="Count",
                               color_continuous_scale="Oranges")
-            fig_dow.update_layout(height=280, margin=dict(t=10, b=10),
+            fig_dow.update_layout(height=310, margin=dict(t=45, b=10),
                                    title="Day of Week",
                                    coloraxis_showscale=False)
             st.plotly_chart(fig_dow, width="stretch")
@@ -389,7 +389,7 @@ with tab_peak:
             fig_pie = px.pie(season_ct, values="Count", names="Season",
                               template=_DARK, hole=0.4,
                               color_discrete_sequence=px.colors.qualitative.Set2)
-            fig_pie.update_layout(height=300, margin=dict(t=10, b=10),
+            fig_pie.update_layout(height=330, margin=dict(t=45, b=10),
                                    title="Season mix")
             st.plotly_chart(fig_pie, width="stretch")
 
@@ -408,7 +408,7 @@ with tab_peak:
                     labels={"avg_gen_mwh": "Avg Gen (MWh)", "fuel_label": "Fuel",
                              "period": ""},
                 )
-                fig_fuel.update_layout(height=300, margin=dict(t=10, b=10),
+                fig_fuel.update_layout(height=330, margin=dict(t=45, b=10),
                                         title="Fuel mix: peak vs baseline")
                 st.plotly_chart(fig_fuel, width="stretch")
 
@@ -534,7 +534,7 @@ with tab_spike:
                 template=_DARK,
                 barmode="overlay", opacity=0.7,
             )
-            fig_mag.update_layout(height=300, margin=dict(t=10, b=10),
+            fig_mag.update_layout(height=330, margin=dict(t=45, b=10),
                                    title="Spike magnitude distribution")
             st.plotly_chart(fig_mag, width="stretch")
 
@@ -549,7 +549,7 @@ with tab_spike:
                                         "month_name": "Month",
                                         "avg_price": "Avg $/MWh"},
                                template=_DARK)
-            fig_freq.update_layout(height=300, margin=dict(t=10, b=10),
+            fig_freq.update_layout(height=330, margin=dict(t=45, b=10),
                                     title="Spike frequency by month")
             st.plotly_chart(fig_freq, width="stretch")
 
@@ -559,7 +559,7 @@ with tab_spike:
         fig_hod = px.bar(hod_sp, x="Hour of Day", y="Spike Count",
                           template=_DARK, color="Spike Count",
                           color_continuous_scale="YlOrRd")
-        fig_hod.update_layout(height=240, margin=dict(t=10, b=10),
+        fig_hod.update_layout(height=270, margin=dict(t=45, b=10),
                                title="Spikes by hour-of-day",
                                coloraxis_showscale=False)
         st.plotly_chart(fig_hod, width="stretch")
@@ -573,7 +573,7 @@ with tab_spike:
                                         labels={"n_hours": "Duration (hours)"},
                                         template=_DARK,
                                         color_discrete_sequence=["#ff7f0e"])
-                fig_dur.update_layout(height=260, margin=dict(t=10, b=10),
+                fig_dur.update_layout(height=290, margin=dict(t=45, b=10),
                                        title="Consecutive spike run length")
                 st.plotly_chart(fig_dur, width="stretch")
             with col_tbl:

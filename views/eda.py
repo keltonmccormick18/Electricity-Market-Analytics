@@ -26,13 +26,13 @@ st.header("Exploratory Data Analysis", anchor=False, divider="gray")
     tab_stl, tab_mstl, tab_corr,
     tab_peak, tab_duck, tab_spike, tab_heatmap,
 ) = st.tabs([
-    "📉 STL",
-    "🔀 MSTL",
-    "🌿 Ren vs Price",
-    "🔥 Peak Demand",
-    "🦆 Duck Curve",
-    "⚡ Price Spikes",
-    "🎯 Forecast MAPE",
+    "STL",
+    "MSTL",
+    "Ren vs Price",
+    "Peak Demand",
+    "Duck Curve",
+    "Price Spikes",
+    "Forecast MAPE",
 ])
 
 _DARK = "plotly_dark"

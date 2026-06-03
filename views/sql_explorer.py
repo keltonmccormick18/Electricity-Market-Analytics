@@ -5,17 +5,18 @@ import plotly.express as px
 import streamlit as st
 
 import db
+from constants import PRICE_TYPE_DAY_AHEAD
 
 # ── Pre-built analytical queries ──────────────────────────────────────────────
 
 PREBUILT = {
-    "Top 10 highest price hours this year": textwrap.dedent("""\
+    "Top 10 highest price hours this year": textwrap.dedent(f"""\
         SELECT
             hour,
             region_id,
             ROUND(price_usd_mwh, 2)  AS price_usd_mwh
         FROM fact_prices
-        WHERE price_type = 'day_ahead'
+        WHERE price_type = '{PRICE_TYPE_DAY_AHEAD}'
           AND YEAR(hour) = YEAR(CURRENT_DATE)
         ORDER BY price_usd_mwh DESC
         LIMIT 10
@@ -40,14 +41,14 @@ PREBUILT = {
         ORDER BY region_id, demand_mwh DESC
         LIMIT 100
     """),
-    "Price spike summary by region": textwrap.dedent("""\
+    "Price spike summary by region": textwrap.dedent(f"""\
         WITH stats AS (
             SELECT
                 region_id, hour, price_usd_mwh,
                 AVG(price_usd_mwh) OVER w  AS rolling_mean,
                 STDDEV(price_usd_mwh) OVER w AS rolling_std
             FROM fact_prices
-            WHERE price_type = 'day_ahead'
+            WHERE price_type = '{PRICE_TYPE_DAY_AHEAD}'
             WINDOW w AS (
                 PARTITION BY region_id
                 ORDER BY hour
@@ -66,7 +67,7 @@ PREBUILT = {
         GROUP BY region_id
         ORDER BY spike_count DESC
     """),
-    "Price vs demand correlation by region": textwrap.dedent("""\
+    "Price vs demand correlation by region": textwrap.dedent(f"""\
         SELECT
             d.region_id,
             YEAR(d.hour)                                   AS year,
@@ -76,7 +77,7 @@ PREBUILT = {
         JOIN fact_prices p
           ON p.hour = d.hour
          AND p.region_id = d.region_id
-         AND p.price_type = 'day_ahead'
+         AND p.price_type = '{PRICE_TYPE_DAY_AHEAD}'
         GROUP BY 1, 2
         ORDER BY 1, 2
     """),
@@ -199,7 +200,7 @@ if "last_result" in st.session_state:
     result = st.session_state.last_result
 
     if result.error:
-        st.error(f"**Query error** — {result.error}", icon="🚨")
+        st.error(f"**Query error** — {result.error}")
     else:
         df = result.df
         m1, m2, m3, _ = st.columns([1, 1, 1, 4])
@@ -208,12 +209,12 @@ if "last_result" in st.session_state:
         m3.metric("Time",    f"{result.elapsed_s * 1000:.0f} ms")
 
         st.dataframe(df, width="stretch", height=360)
-        st.download_button("⬇ Download CSV", df.to_csv(index=False).encode(),
+        st.download_button("Download CSV", df.to_csv(index=False).encode(),
                            "query_result.csv", "text/csv")
 
         num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
         if num_cols and not df.empty:
-            with st.expander("📊 Chart", expanded=True):
+            with st.expander("Chart", expanded=True):
                 all_cols  = df.columns.tolist()
                 time_cols = [c for c in all_cols if pd.api.types.is_datetime64_any_dtype(df[c])]
                 cat_cols  = [c for c in all_cols if c not in num_cols]

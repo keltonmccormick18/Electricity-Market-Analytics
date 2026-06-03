@@ -10,5 +10,11 @@ data/*.parquet
 # Secrets — never commit
 .streamlit/secrets.toml
 
+# Generated exports (Tableau CSVs)
+exports/
+
+# Local agent / editor tooling
+.claude/
+
 # macOS
 .DS_Store

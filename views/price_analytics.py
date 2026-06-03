@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 import db
-from constants import PRICE_REGIONS, REGION_COLORS, DOW_LABELS
+from constants import PRICE_REGIONS, REGION_COLORS, DOW_LABELS, PRICE_TYPE_DAY_AHEAD
 
 # ── Data loaders ──────────────────────────────────────────────────────────────
 
@@ -19,7 +19,7 @@ def load_heatmap(region: str, year: int) -> pd.DataFrame | None:
             ROUND(AVG(price_usd_mwh), 2) AS avg_price
         FROM fact_prices
         WHERE region_id  = '{region}'
-          AND price_type = 'day_ahead'
+          AND price_type = '{PRICE_TYPE_DAY_AHEAD}'
           AND YEAR(hour) = {year}
           AND price_usd_mwh BETWEEN -100 AND 1000
         GROUP BY 1, 2
@@ -39,7 +39,7 @@ def load_spikes(region: str, year: int) -> pd.DataFrame | None:
                 STDDEV(price_usd_mwh) OVER w AS rolling_std
             FROM fact_prices
             WHERE region_id  = '{region}'
-              AND price_type = 'day_ahead'
+              AND price_type = '{PRICE_TYPE_DAY_AHEAD}'
               AND YEAR(hour) = {year}
             WINDOW w AS (ORDER BY hour ROWS BETWEEN 167 PRECEDING AND CURRENT ROW)
         )
@@ -85,7 +85,7 @@ def load_merit_order(start_year: int, end_year: int) -> pd.DataFrame | None:
             END AS season
         FROM fact_generation g
         JOIN fact_prices p
-          ON p.hour = g.hour AND p.region_id = g.region_id AND p.price_type = 'day_ahead'
+          ON p.hour = g.hour AND p.region_id = g.region_id AND p.price_type = '{PRICE_TYPE_DAY_AHEAD}'
         WHERE YEAR(g.hour) BETWEEN {start_year} AND {end_year}
           AND g.region_id IN ('CISO', 'PJM', 'NYIS', 'ISNE')
           AND p.price_usd_mwh BETWEEN -50 AND 500
@@ -117,7 +117,7 @@ def load_merit_hourly(start_year: int, end_year: int, region: str) -> pd.DataFra
             END AS season
         FROM fact_generation g
         JOIN fact_prices p
-          ON p.hour = g.hour AND p.region_id = g.region_id AND p.price_type = 'day_ahead'
+          ON p.hour = g.hour AND p.region_id = g.region_id AND p.price_type = '{PRICE_TYPE_DAY_AHEAD}'
         JOIN fact_demand d
           ON d.hour = g.hour AND d.region_id = g.region_id
         WHERE g.region_id = '{region}'
@@ -167,7 +167,7 @@ with st.sidebar:
 st.header("Price Analytics", anchor=False, divider="gray")
 
 tab_heat, tab_spikes, tab_merit = st.tabs(
-    ["🌡️ Price Heatmap", "⚡ Price Spikes", "🌿 Merit Order Effect"]
+    ["Price Heatmap", "Price Spikes", "Merit Order Effect"]
 )
 
 # ── Tab 1: Heatmap ────────────────────────────────────────────────────────────
@@ -331,7 +331,6 @@ with tab_merit:
             f"Controlling for demand and hour-of-day, a 10pp increase in renewable share "
             f"is associated with a **{ren_coef * 0.10:+.2f} $/MWh** change in day-ahead price "
             f"({direction}, {sig_label} at α=0.05, p={ren_p:.4f}).",
-            icon="📊",
         )
 
         # Partial regression (added-variable) plot

@@ -11,16 +11,16 @@ st.set_page_config(
 pg = st.navigation(
     {
         "Overview": [
-            st.Page("views/home.py", title="Home", icon="🏠", default=True),
+            st.Page("views/home.py", title="Home", default=True),
         ],
         "Analytics": [
-            st.Page("views/generation_mix.py",  title="Generation Mix",  icon="⚡"),
-            st.Page("views/price_analytics.py", title="Price Analytics", icon="💰"),
-            st.Page("views/eda.py",             title="EDA",             icon="🔬"),
-            st.Page("views/sql_explorer.py",    title="SQL Explorer",    icon="🔍"),
+            st.Page("views/generation_mix.py",  title="Generation Mix"),
+            st.Page("views/price_analytics.py", title="Price Analytics"),
+            st.Page("views/eda.py",             title="EDA"),
+            st.Page("views/sql_explorer.py",    title="SQL Explorer"),
         ],
         "Forecasting": [
-            st.Page("views/forecast.py", title="Demand Forecast", icon="🔮"),
+            st.Page("views/forecast.py", title="Demand Forecast"),
         ],
     }
 )

@@ -21,7 +21,9 @@ Setup:
 """
 
 import os
+import io
 import time
+import zipfile
 import argparse
 import logging
 from datetime import datetime, timedelta, timezone
@@ -33,6 +35,8 @@ import pandas as pd
 import requests
 import duckdb
 from dotenv import load_dotenv
+
+from constants import PRICE_TYPE_DAY_AHEAD
 
 
 def _load_streamlit_secrets(path: str = ".streamlit/secrets.toml") -> None:
@@ -65,6 +69,27 @@ PAGE_SIZE = 5000
 
 # Polite delay between API calls (seconds) — avoid rate limiting
 REQUEST_DELAY = 0.5
+
+# ── ISO price-API configuration ────────────────────────────────────────────────
+# Real day-ahead LMP, fetched directly from each ISO (not EIA).
+# These replace the old TI-as-price proxy.
+
+# CAISO OASIS — public, no key. Rate-limited to ~1 request / 5s, max 31 days/request.
+CAISO_OASIS_URL = "http://oasis.caiso.com/oasisapi/SingleZip"
+CAISO_HUB       = "TH_NP15_GEN-APND"   # NP15 trading hub as the CISO reference price
+CAISO_DELAY     = 5.0                   # OASIS throttles aggressively
+
+# PJM Data Miner 2 — requires a free subscription key (Ocp-Apim-Subscription-Key).
+# Register at https://dataminer2.pjm.com → My Account → API key.
+PJM_API_URL  = "https://api.pjm.com/api/v1/da_hrl_lmps"
+PJM_HUB_PNODE = 51217                   # Western Hub as the PJM reference price
+PJM_PAGE_SIZE = 50000                   # max rowCount per request
+
+# NYISO — public market data, no key. Monthly ZIP archives of daily zonal LBMP.
+# Each zip (named by the month's first day) holds one CSV per day.
+NYISO_DAMLBMP_URL = "http://mis.nyiso.com/public/csv/damlbmp"   # /{YYYYMM01}damlbmp_zone_csv.zip
+NYISO_ZONE        = "N.Y.C."            # NYC zone as the NYIS reference price
+NYISO_TZ          = "America/New_York"  # timestamps are Eastern prevailing time → convert to UTC
 
 logging.basicConfig(
     level=logging.INFO,
@@ -295,65 +320,322 @@ def ingest_prices(con: duckdb.DuckDBPyConnection,
                   date_from: str,
                   date_to: str) -> int:
     """
-    Fetch hourly day-ahead LMP prices.
-    Note: EIA has limited price coverage — NYIS, ISNE, PJM have the best data.
+    Dispatch real day-ahead LMP ingestion to the per-ISO fetchers.
 
-    EIA endpoint: electricity/rto/region-data  (type=TI = total interchange, 
-    prices available via electricity/wholesale-prices for some nodes)
+    Each ISO publishes prices through its own API (EIA does not carry hourly
+    wholesale LMP), so there is no shared endpoint. We pull a representative
+    trading hub per region and normalize to (hour, region_id, price_type,
+    price_usd_mwh) with price_type = 'day_ahead_lmp'.
+
+    TIME ZONES: all sources share one clock (UTC). CAISO returns GMT, PJM is
+    fetched as datetime_beginning_utc, EIA demand/generation timestamps are also
+    UTC (verified — see _parse_eia_hour), and NYISO's Eastern-prevailing stamps
+    are converted to UTC in its fetcher. Joins on `hour` align the same real
+    instant across tables, so no offset correction is needed.
     """
-    # EIA's wholesale price endpoint covers fewer regions than demand/generation.
-    # We use the day-ahead price series where available.
-    price_regions = [r for r in regions if r in ("NYIS", "ISNE", "PJM", "CISO")]
+    total = 0
+    if "CISO" in regions:
+        total += ingest_prices_caiso(con, date_from, date_to)
+    if "PJM" in regions:
+        total += ingest_prices_pjm(con, date_from, date_to)
+    if "NYIS" in regions:
+        total += ingest_prices_nyiso(con, date_from, date_to)
+    return total
 
-    if not price_regions:
-        log.info("No price-eligible regions in selection, skipping prices")
-        return 0
 
+def ingest_prices_caiso(con: duckdb.DuckDBPyConnection,
+                        date_from: str,
+                        date_to: str) -> int:
+    """
+    Day-ahead LMP for the CISO region from the CAISO OASIS API (PRC_LMP / DAM).
+
+    Public, no key required. Throttled to ~1 req/5s and capped at 31 days per
+    request, so we chunk the range monthly. Returns a ZIP containing one CSV;
+    the price lives in the 'MW' column where LMP_TYPE == 'LMP'.
+    """
     total_inserted = 0
+    frames: list[pd.DataFrame] = []
 
-    for region in price_regions:
-        log.info("Fetching prices: %s  %s → %s", region, date_from, date_to)
-
+    for chunk_start, chunk_end in _month_chunks(date_from, date_to):
+        log.info("Fetching CAISO DAM LMP: %s → %s  (node %s)",
+                 chunk_start, chunk_end, CAISO_HUB)
         params = {
-            "frequency":            "hourly",
-            "data[0]":              "value",
-            "facets[respondent][]": region,
-            "facets[type][]":       ["TI"],   # total interchange as price proxy
-            "start":                date_from,
-            "end":                  date_to,
-            "sort[0][column]":      "period",
-            "sort[0][direction]":   "asc",
+            "queryname":     "PRC_LMP",
+            "version":       "1",
+            "startdatetime": _caiso_dt(chunk_start),
+            "enddatetime":   _caiso_dt(chunk_end),
+            "market_run_id": "DAM",
+            "node":          CAISO_HUB,
+            "resultformat":  "6",          # CSV
         }
-
         try:
-            rows = eia_fetch_all("electricity/rto/region-data", params)
+            resp = requests.get(CAISO_OASIS_URL, params=params, timeout=120)
+            resp.raise_for_status()
         except requests.HTTPError as e:
-            log.error("HTTP error for %s prices: %s", region, e)
+            log.error("CAISO HTTP error %s → %s: %s", chunk_start, chunk_end, e)
+            _log_ingestion(con, "prices_caiso", "CISO", chunk_start, chunk_end, 0, "error", str(e))
+            time.sleep(CAISO_DELAY)
             continue
 
-        if rows:
-            df = pd.DataFrame(
-                [(_parse_eia_hour(row["period"]), region, "day_ahead", row.get("value"))
-                 for row in rows],
-                columns=["hour", "region_id", "price_type", "price_usd_mwh"],
-            )
-            con.execute("INSERT OR REPLACE INTO fact_prices SELECT * FROM df")
-            total_inserted += len(df)
-            _log_ingestion(con, "prices", region, date_from, date_to, len(df), "success")
-            log.info("  inserted %d price rows for %s", len(df), region)
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(resp.content))
+        except zipfile.BadZipFile:
+            # OASIS returns a non-ZIP error/throttle page instead of data
+            log.warning("CAISO returned non-ZIP for %s → %s (no data or throttled)",
+                        chunk_start, chunk_end)
+            _log_ingestion(con, "prices_caiso", "CISO", chunk_start, chunk_end, 0, "empty")
+            time.sleep(CAISO_DELAY)
+            continue
+
+        member = zf.namelist()[0]
+        if not member.endswith(".csv"):
+            # OASIS returns an XML error report instead of a CSV when the request
+            # is rejected (e.g. 1000 = no data for selection, 1004 = range too large).
+            # Pull the actual code/description so the log says *why* it failed.
+            reason = _caiso_error(zf.read(member))
+            log.warning("CAISO error for %s → %s: %s", chunk_start, chunk_end, reason)
+            _log_ingestion(con, "prices_caiso", "CISO", chunk_start, chunk_end, 0, "error", reason)
+            time.sleep(CAISO_DELAY)
+            continue
+
+        raw = pd.read_csv(zf.open(member))
+        raw = raw[raw["LMP_TYPE"] == "LMP"]
+        if raw.empty:
+            time.sleep(CAISO_DELAY)
+            continue
+
+        out = pd.DataFrame({
+            "hour":          pd.to_datetime(raw["INTERVALSTARTTIME_GMT"], utc=True).dt.tz_localize(None),
+            "region_id":     "CISO",
+            "price_type":    PRICE_TYPE_DAY_AHEAD,
+            "price_usd_mwh": raw["MW"].astype(float),
+        })
+        frames.append(out)
+        time.sleep(CAISO_DELAY)
+
+    if frames:
+        df = pd.concat(frames, ignore_index=True).drop_duplicates(subset=["hour", "region_id", "price_type"])
+        con.execute("INSERT OR REPLACE INTO fact_prices SELECT * FROM df")
+        total_inserted = len(df)
+        _log_ingestion(con, "prices_caiso", "CISO", date_from, date_to, total_inserted, "success")
+        log.info("  inserted %d CAISO price rows", total_inserted)
+
+    return total_inserted
+
+
+def ingest_prices_pjm(con: duckdb.DuckDBPyConnection,
+                      date_from: str,
+                      date_to: str) -> int:
+    """
+    Day-ahead LMP for the PJM region from PJM Data Miner 2 (da_hrl_lmps).
+
+    Requires PJM_API_KEY (Ocp-Apim-Subscription-Key). We pull the Western Hub
+    pnode as the PJM reference price and paginate via startRow/rowCount using
+    the X-TotalRows response header. total_lmp_da is the day-ahead LMP in $/MWh.
+    """
+    key = os.getenv("PJM_API_KEY")
+    if not key:
+        log.warning("PJM_API_KEY not set — skipping PJM prices. "
+                    "Register at https://dataminer2.pjm.com for a free key.")
+        return 0
+
+    headers = {"Ocp-Apim-Subscription-Key": key}
+    # PJM range filter format: 'start to end' in EPT (Eastern Prevailing Time).
+    date_filter = f"{date_from} 00:00 to {date_to} 23:59"
+
+    rows: list[dict] = []
+    start_row = 1
+    while True:
+        params = {
+            "rowCount":               PJM_PAGE_SIZE,
+            "startRow":               start_row,
+            "datetime_beginning_ept": date_filter,
+            "pnode_id":               PJM_HUB_PNODE,
+            "fields":                 "datetime_beginning_utc,pnode_id,total_lmp_da",
+        }
+        try:
+            resp = requests.get(PJM_API_URL, headers=headers, params=params, timeout=120)
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            log.error("PJM HTTP error (startRow %d): %s", start_row, e)
+            _log_ingestion(con, "prices_pjm", "PJM", date_from, date_to, 0, "error", str(e))
+            return 0
+
+        payload = resp.json()
+        items = payload.get("items", [])
+        if not items:
+            break
+        rows.extend(items)
+
+        total = int(resp.headers.get("X-TotalRows", len(rows)))
+        log.info("  fetched %d / %d PJM price rows (startRow %d)", len(rows), total, start_row)
+        start_row += PJM_PAGE_SIZE
+        if start_row > total:
+            break
+        time.sleep(REQUEST_DELAY)
+
+    if not rows:
+        log.warning("No PJM price data returned")
+        return 0
+
+    df = pd.DataFrame(
+        [(_parse_pjm_utc(r["datetime_beginning_utc"]), "PJM", PRICE_TYPE_DAY_AHEAD, r.get("total_lmp_da"))
+         for r in rows],
+        columns=["hour", "region_id", "price_type", "price_usd_mwh"],
+    ).drop_duplicates(subset=["hour", "region_id", "price_type"])
+
+    con.execute("INSERT OR REPLACE INTO fact_prices SELECT * FROM df")
+    _log_ingestion(con, "prices_pjm", "PJM", date_from, date_to, len(df), "success")
+    log.info("  inserted %d PJM price rows", len(df))
+    return len(df)
+
+
+def ingest_prices_nyiso(con: duckdb.DuckDBPyConnection,
+                        date_from: str,
+                        date_to: str) -> int:
+    """
+    Day-ahead zonal LBMP for the NYIS region from NYISO public market data.
+
+    Public, no key. Data is published as monthly ZIP archives (named by the
+    month's first day), each containing one daily CSV. We take the N.Y.C. zone
+    as the NYIS reference price.
+
+    TIME ZONE: NYISO 'Time Stamp' is Eastern *prevailing* time (DST-aware), unlike
+    CAISO (GMT) and PJM (UTC). We convert America/New_York → UTC so NYIS shares
+    the same clock as every other table (ambiguous fall-back hour inferred from
+    order; nonexistent spring-forward hour shifted forward).
+    """
+    total_inserted = 0
+    frames: list[pd.DataFrame] = []
+
+    for ym in _month_firsts(date_from, date_to):
+        url = f"{NYISO_DAMLBMP_URL}/{ym}damlbmp_zone_csv.zip"
+        log.info("Fetching NYISO DAM LBMP month %s (zone %s)", ym, NYISO_ZONE)
+        try:
+            resp = requests.get(url, timeout=120)
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            log.error("NYISO HTTP error for %s: %s", ym, e)
+            _log_ingestion(con, "prices_nyiso", "NYIS", ym, ym, 0, "error", str(e))
+            time.sleep(REQUEST_DELAY)
+            continue
+
+        if resp.content[:2] != b"PK":
+            log.warning("NYISO returned non-ZIP for %s (no data?)", ym)
+            _log_ingestion(con, "prices_nyiso", "NYIS", ym, ym, 0, "empty")
+            time.sleep(REQUEST_DELAY)
+            continue
+
+        zf = zipfile.ZipFile(io.BytesIO(resp.content))
+        day_frames = [
+            pd.read_csv(zf.open(n)) for n in zf.namelist() if n.endswith(".csv")
+        ]
+        if not day_frames:
+            time.sleep(REQUEST_DELAY)
+            continue
+
+        raw = pd.concat(day_frames, ignore_index=True)
+        raw = raw[raw["Name"] == NYISO_ZONE].copy()
+        if raw.empty:
+            time.sleep(REQUEST_DELAY)
+            continue
+
+        # EPT local → UTC (naive), matching the single-clock convention
+        ts_local = pd.to_datetime(raw["Time Stamp"], format="%m/%d/%Y %H:%M")
+        ts_utc = (
+            ts_local.dt.tz_localize(NYISO_TZ, ambiguous="infer", nonexistent="shift_forward")
+            .dt.tz_convert("UTC")
+            .dt.tz_localize(None)
+        )
+        out = pd.DataFrame({
+            "hour":          ts_utc,
+            "region_id":     "NYIS",
+            "price_type":    PRICE_TYPE_DAY_AHEAD,
+            "price_usd_mwh": raw["LBMP ($/MWHr)"].astype(float),
+        })
+        frames.append(out)
+        time.sleep(REQUEST_DELAY)
+
+    if frames:
+        df = pd.concat(frames, ignore_index=True).drop_duplicates(
+            subset=["hour", "region_id", "price_type"]
+        )
+        con.execute("INSERT OR REPLACE INTO fact_prices SELECT * FROM df")
+        total_inserted = len(df)
+        _log_ingestion(con, "prices_nyiso", "NYIS", date_from, date_to, total_inserted, "success")
+        log.info("  inserted %d NYISO price rows", total_inserted)
 
     return total_inserted
 
 
 # ── Utility helpers ───────────────────────────────────────────────────────────
 
+def _caiso_dt(date_str: str) -> str:
+    """'YYYY-MM-DD' → CAISO OASIS GMT timestamp 'YYYYMMDDT00:00-0000'."""
+    return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y%m%dT00:00-0000")
+
+
+def _caiso_error(xml_bytes: bytes) -> str:
+    """
+    Extract 'ERR_CODE: ERR_DESC' from a CAISO OASIS error report.
+    Falls back to a short raw snippet if the expected tags aren't present.
+    """
+    import re
+    text = xml_bytes.decode("utf-8", "replace")
+    code = re.search(r"<m:ERR_CODE>(.*?)</m:ERR_CODE>", text)
+    desc = re.search(r"<m:ERR_DESC>(.*?)</m:ERR_DESC>", text)
+    if code or desc:
+        return f"{code.group(1) if code else '?'}: {desc.group(1) if desc else '?'}"
+    return text[:200].strip()
+
+
+def _month_firsts(date_from: str, date_to: str):
+    """
+    Yield 'YYYYMM01' strings for every calendar month spanning
+    [date_from, date_to]. Used to address NYISO monthly ZIP archives.
+    """
+    cur = datetime.strptime(date_from, "%Y-%m-%d").replace(day=1)
+    end = datetime.strptime(date_to, "%Y-%m-%d")
+    while cur <= end:
+        yield cur.strftime("%Y%m01")
+        cur = (cur.replace(year=cur.year + 1, month=1) if cur.month == 12
+               else cur.replace(month=cur.month + 1))
+
+
+def _parse_pjm_utc(period: str) -> str:
+    """
+    PJM datetime_beginning_utc → naive 'YYYY-MM-DD HH:MM:SS'.
+    PJM returns e.g. '2024-01-15T14:00:00' (already UTC); we store naive UTC.
+    """
+    return pd.to_datetime(period).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _month_chunks(date_from: str, date_to: str):
+    """
+    Yield (start, end) 'YYYY-MM-DD' pairs ≤ 30 days apart, covering
+    [date_from, date_to]. CAISO OASIS rejects PRC_LMP ranges of 31+ days
+    (error 1004) once the inclusive GMT boundary is applied, so we use 30.
+    """
+    start = datetime.strptime(date_from, "%Y-%m-%d")
+    end   = datetime.strptime(date_to, "%Y-%m-%d")
+    while start < end:
+        chunk_end = min(start + timedelta(days=30), end)
+        yield start.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d")
+        start = chunk_end
+
+
 def _parse_eia_hour(period: str) -> str:
     """
-    Convert EIA period string to ISO 8601 UTC timestamp.
-    EIA returns periods as 'YYYY-MM-DDTHH' in local BA time (no tz info).
-    We store as-is and handle tz in analysis queries.
+    Convert EIA period string to a naive 'YYYY-MM-DD HH:00:00' timestamp.
+
+    EIA's hourly rto endpoints return periods as 'YYYY-MM-DDTHH' in **UTC**
+    (no tz suffix). This was verified empirically: CISO solar generation peaks
+    at stored hour 20, i.e. 20:00 UTC ≈ local noon — so these timestamps are
+    UTC, not local BA time. CAISO/PJM prices are also stored in UTC, so all
+    `hour` columns share one clock and join directly with no offset.
+    (Diagnostic: solar-peak anchor + demand–price cross-correlation peaks at
+    lag +2h, the intrinsic economic phase, not a 7–8h clock offset.)
     """
-    # EIA format: '2024-01-15T14' → append ':00:00+00:00' for DuckDB TIMESTAMPTZ
     if len(period) == 13:           # 'YYYY-MM-DDTHH'
         return period + ":00:00"
     return period

@@ -52,7 +52,7 @@ with st.sidebar:
 st.header("Demand Forecast", anchor=False, divider="gray")
 
 tab_cmp, tab_res, tab_prob = st.tabs(
-    ["📊 Model Comparison", "🔬 Residual Analysis", "📈 Probabilistic Forecast"]
+    ["Model Comparison", "Residual Analysis", "Probabilistic Forecast"]
 )
 
 # ── Session-state keys ────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ with tab_cmp:
                          disabled=(cached is not None))
     if cached is not None:
         st.caption("Results cached — adjust settings above to retrain.")
-        if st.button("🔄 Clear cache & retrain"):
+        if st.button("Clear cache & retrain"):
             st.session_state.get(_SK, {}).pop(_cache_key(), None)
             st.rerun()
 

@@ -23,6 +23,7 @@ import pandas as pd
 
 import db
 import forecasting as fc
+from constants import PRICE_TYPE_DAY_AHEAD
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -156,7 +157,7 @@ def load_ren_price(region: str, year: int) -> pd.DataFrame | None:
         JOIN fact_prices p
           ON p.hour = g.hour
          AND p.region_id = g.region_id
-         AND p.price_type = 'day_ahead'
+         AND p.price_type = '{PRICE_TYPE_DAY_AHEAD}'
         WHERE g.region_id = '{region}'
           AND YEAR(g.hour) = {year}
           AND p.price_usd_mwh BETWEEN -50 AND 500
@@ -296,7 +297,7 @@ def load_spikes_full(region: str, year: int) -> pd.DataFrame | None:
                 STDDEV(price_usd_mwh) OVER w AS rolling_std
             FROM fact_prices
             WHERE region_id  = '{region}'
-              AND price_type = 'day_ahead'
+              AND price_type = '{PRICE_TYPE_DAY_AHEAD}'
               AND YEAR(hour) = {year}
             WINDOW w AS (ORDER BY hour ROWS BETWEEN 167 PRECEDING AND CURRENT ROW)
         )

@@ -19,6 +19,9 @@ REGION_COLORS = {
 }
 
 REGIONS      = ["CISO", "PJM", "ERCO", "MISO", "NYIS", "ISNE"]
-PRICE_REGIONS = ["CISO", "PJM", "NYIS", "ISNE"]   # EIA price coverage
+PRICE_REGIONS = ["CISO", "PJM", "NYIS", "ISNE", "ERCO"]   # EIA price coverage (TI proxy)
 
 DOW_LABELS = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
+
+# fact_prices.price_type value for day-ahead LMP. Written by ingestion, filtered by consumers.
+PRICE_TYPE_DAY_AHEAD = "day_ahead_lmp"

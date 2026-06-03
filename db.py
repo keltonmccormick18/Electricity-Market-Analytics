@@ -40,8 +40,8 @@ def backend_label(con: duckdb.DuckDBPyConnection) -> str:
     except Exception:
         path = ""
     if "md:" in str(path) or _secret("MOTHERDUCK_TOKEN"):
-        return "☁️ MotherDuck"
-    return f"💾 Local · {LOCAL_DB}"
+        return "MotherDuck"
+    return f"Local · {LOCAL_DB}"
 
 
 # ── Schema introspection ──────────────────────────────────────────────────────
